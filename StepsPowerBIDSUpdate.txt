@@ -1,0 +1,127 @@
+Good question — this is the most critical step and I want to make sure it's crystal clear for you.
+
+There are two places you update the data source connection — once in **Report Builder** before publishing, and once on the **Report Server** after publishing. Let me walk through both.
+
+## In Report Builder (Before Publishing)
+
+When you open the `.rdl` file in Report Builder, look at the left side panel called **Report Data**. If you don't see it, click **View → Report Data** in the top menu.
+
+Under that panel you'll see a tree structure like this:
+
+```
+Report Data
+├── Parameters
+│   ├── FISCAL_YEAR
+│   └── REGION
+├── Data Sources
+│   └── WebFocusDataSource    ← THIS is what you update
+└── Datasets
+    └── DS_STORE_SALES_1
+```
+
+Right-click on **WebFocusDataSource** → click **Data Source Properties**. A dialog box opens with these fields:
+
+**Name** — Leave as `WebFocusDataSource` or rename to something meaningful like `SalesDB`
+
+**Connection type** — This is a dropdown. Pick your database type:
+- `Microsoft SQL Server` if your data is in SQL Server
+- `Oracle` if it's Oracle
+- `ODBC` if your WebFocus was connecting via ODBC
+
+**Connection string** — This is the most important field. Here are exact strings for common databases:
+
+For **SQL Server**:
+```
+Data Source=your-db-server-hostname;Initial Catalog=your-database-name
+```
+Real example:
+```
+Data Source=prod-sql-01.yourcompany.com;Initial Catalog=SalesDB
+```
+
+For **SQL Server with a named instance**:
+```
+Data Source=prod-sql-01.yourcompany.com\INSTANCE1;Initial Catalog=SalesDB
+```
+
+For **SQL Server with a port**:
+```
+Data Source=prod-sql-01.yourcompany.com,1433;Initial Catalog=SalesDB
+```
+
+For **Oracle**:
+```
+Data Source=(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=oracle-server.yourcompany.com)(PORT=1521))(CONNECT_DATA=(SERVICE_NAME=ORCL)))
+```
+
+For **ODBC** (if your org had an ODBC DSN set up for WebFocus):
+```
+DSN=YourExistingDSNName
+```
+
+**Where do you find these values?** Ask your DBA or the team that maintained the WebFocus environment. Your WebFocus reports were connecting to the same database — the connection details are usually in the WebFocus server's configuration files, EDASPROF, or the DBA access files (.acx). The server hostname and database name will be the same; only the connection method changes from WebFocus's adapter to Power BI's provider.
+
+Next, click the **Credentials** button in the same dialog. You have these options:
+
+- **Use Windows Authentication** — Pick this if your organization uses Active Directory and your database trusts Windows logins. This is the most common for SQL Server in corporate environments.
+
+- **Use this user name and password** — Enter a database username and password. Use this for Oracle or if your DBA gave you specific SQL auth credentials.
+
+- **Prompt for credentials** — Each user entering the report gets asked for their credentials. Less convenient but most secure.
+
+After entering everything, click **Test Connection**. You should see "Connection created successfully." If not, double-check the server hostname (try pinging it from your machine) and verify the database name is spelled correctly.
+
+Click **OK** to save.
+
+## On Report Server (After Publishing)
+
+After you publish the report, the server needs its own copy of the connection credentials — because when users run reports through the web portal, Report Builder isn't involved anymore. The server runs the query itself.
+
+Open your browser and go to your Report Server web portal:
+```
+https://your-reportserver/reports
+```
+
+Navigate to the folder where you published the report. Hover over the report and click the **three dots (⋯)** → **Manage**.
+
+Click **Data Sources** in the left menu. You'll see `WebFocusDataSource` listed.
+
+You have two choices here:
+
+**Choice A — Custom data source (per report):** Fill in the same connection type, connection string, and credentials as you did in Report Builder. Under credentials, pick "Credentials stored securely in the report server" and enter the username/password. Check "Use as Windows credentials" if it's a Windows/AD account.
+
+**Choice B — Shared data source (recommended for 100+ reports):** This is what you want. Instead of configuring the connection 100+ times, you create ONE shared data source and point all reports to it.
+
+To create a shared data source:
+
+1. In the web portal, go to the folder where you want to store it (like a root "Shared" folder)
+2. Click **+ New** → **Data Source**
+3. Fill in:
+   - Name: `ProductionSalesDB`
+   - Connection type: `Microsoft SQL Server` (or your DB type)
+   - Connection string: `Data Source=prod-sql-01.yourcompany.com;Initial Catalog=SalesDB`
+   - Credentials: Enter username/password and check "Use as Windows credentials" if applicable
+4. Click **Create**
+
+Then for each published report:
+1. Go to the report → Manage → Data Sources
+2. Change from "A custom data source" to **"A shared data source"**
+3. Click **Browse** and select the shared data source you just created
+4. Click **Apply**
+
+Now if your database server ever changes (migration, failover, etc.), you update the ONE shared data source and all 100+ reports automatically pick up the new connection.
+
+## What If You Don't Know Your Database Details?
+
+Since you're migrating from WebFocus, the database your reports query already exists. To find the connection details, check these places:
+
+Your WebFocus admin or DBA is the fastest source — ask them for the database server hostname, database name, and what authentication method WebFocus used.
+
+If you have access to the WebFocus server, look in the `.acx` (access) files that sit alongside your `.mas` files. They contain lines like:
+```
+SEGNAME=..., CONNECTION=SQLSERVR, DBNAME=SalesDB, SERVER=prod-sql-01
+```
+
+Or check the WebFocus `EDASPROF.prf` or server profiles for connection strings defined at the server level.
+
+The generated SQL in the `.rdl` dataset uses the table name from your FEX file's `TABLE FILE STORE_SALES` — so `STORE_SALES` is the table name. Your DBA can confirm which database and schema that table lives in.
